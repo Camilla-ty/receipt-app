@@ -11,7 +11,6 @@ export type ExtractedExpense = {
 
 export type SavedExpense = ExtractedExpense & {
   id: string;
-  receipt_link: string;
   savedAt: string;
 };
 

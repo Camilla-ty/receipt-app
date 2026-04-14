@@ -7,7 +7,6 @@ const HEADER_ROW = [
   "Amount",
   "Description",
   "Payment Method",
-  "Receipt Link",
 ] as const;
 
 /** Thrown when GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URI is missing. */
@@ -66,7 +65,7 @@ function getSheetsClient() {
 export type SaveExpenseRowInput = {
   spreadsheetId: string;
   year: string;
-  row: [string, string, string, string, string, string, string];
+  row: [string, string, string, string, string, string];
 };
 
 /**
@@ -94,7 +93,7 @@ export async function saveExpenseToYearSheet(
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: sheetRangeA1(year, "A1:G1"),
+      range: sheetRangeA1(year, "A1:F1"),
       valueInputOption: "USER_ENTERED",
       requestBody: {
         values: [HEADER_ROW.slice() as string[]],
@@ -104,7 +103,7 @@ export async function saveExpenseToYearSheet(
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: sheetRangeA1(year, "A:G"),
+    range: sheetRangeA1(year, "A:F"),
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {

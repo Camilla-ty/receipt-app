@@ -40,7 +40,6 @@ function extractResponse(
   const ex = toExtractedExpense(parsed);
   return {
     raw_text: rawText,
-    receipt_link: "",
     extraction_note,
     ...ex,
     date: parsed.date,

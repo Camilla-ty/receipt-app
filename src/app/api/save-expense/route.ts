@@ -17,7 +17,6 @@ const FIELDS = [
   "amount",
   "description",
   "payment_method",
-  "receipt_link",
 ] as const;
 
 type Body = Record<(typeof FIELDS)[number], unknown>;
@@ -56,7 +55,6 @@ export async function POST(request: NextRequest) {
   const category = String(b.category ?? "");
   const description = String(b.description ?? "");
   const payment_method = String(b.payment_method ?? "");
-  const receipt_link = String(b.receipt_link ?? "");
 
   const year = extractYearFromDate(date);
   if (!year) {
@@ -76,7 +74,6 @@ export async function POST(request: NextRequest) {
     string,
     string,
     string,
-    string,
   ] = [
     date,
     vendor,
@@ -84,7 +81,6 @@ export async function POST(request: NextRequest) {
     normalizeAmount(b.amount),
     description,
     payment_method,
-    receipt_link,
   ];
 
   try {

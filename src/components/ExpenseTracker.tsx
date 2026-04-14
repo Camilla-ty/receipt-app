@@ -5,19 +5,7 @@ import type { ExtractedExpense, SavedExpense } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 
 const STORAGE_KEY = "expense-tracker-saved";
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
-  });
-}
-
-function defaultForm(): Record<keyof ExtractedExpense, string> & {
-  receipt_link: string;
-} {
+function defaultForm(): Record<keyof ExtractedExpense, string> {
   return {
     date: "",
     vendor: "",
@@ -25,7 +13,6 @@ function defaultForm(): Record<keyof ExtractedExpense, string> & {
     amount: "",
     description: "",
     payment_method: "",
-    receipt_link: "",
   };
 }
 
@@ -82,12 +69,6 @@ export function ExpenseTracker() {
     const url = URL.createObjectURL(f);
     setPreviewUrl(url);
     setStatus(null);
-    try {
-      const dataUrl = await fileToDataUrl(f);
-      setForm((prev) => ({ ...prev, receipt_link: dataUrl }));
-    } catch {
-      setForm((prev) => ({ ...prev, receipt_link: "" }));
-    }
   };
 
   const runExtract = async () => {
@@ -103,7 +84,6 @@ export function ExpenseTracker() {
       const res = await fetch("/api/extract", { method: "POST", body });
       const data = (await res.json()) as ExtractedExpense & {
         raw_text?: string;
-        receipt_link?: string;
         extraction_note?: string;
         error?: string;
       };
@@ -123,10 +103,6 @@ export function ExpenseTracker() {
 
   const saveExpense = async () => {
     const amountNum = parseFloat(form.amount.replace(/,/g, ""));
-    if (!form.receipt_link.trim()) {
-      setStatus("Upload a receipt image before saving.");
-      return;
-    }
     if (!Number.isFinite(amountNum)) {
       setStatus("Enter a valid amount.");
       return;
@@ -147,7 +123,6 @@ export function ExpenseTracker() {
           amount: amountNum,
           description: form.description.trim(),
           payment_method: form.payment_method.trim(),
-          receipt_link: form.receipt_link,
         }),
       });
 
@@ -174,7 +149,6 @@ export function ExpenseTracker() {
         amount: amountNum,
         description: form.description.trim(),
         payment_method: form.payment_method.trim(),
-        receipt_link: form.receipt_link,
         savedAt: new Date().toISOString(),
       };
       const next = [record, ...saved];
@@ -367,36 +341,6 @@ export function ExpenseTracker() {
           />
         </label>
 
-        <div className="block">
-          <span className="mb-1 block text-xs text-[var(--muted)]">
-            Receipt link
-          </span>
-          <input
-            type="text"
-            readOnly
-            className={`${fieldClass} cursor-not-allowed bg-neutral-50 font-mono text-xs dark:bg-neutral-900`}
-            title={
-              form.receipt_link ||
-              "Filled when you upload an image (data URL for this session)"
-            }
-            value={
-              form.receipt_link
-                ? `${form.receipt_link.slice(0, 56)}…`
-                : "— upload an image —"
-            }
-          />
-          {form.receipt_link ? (
-            <a
-              href={form.receipt_link}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-block text-sm text-[var(--accent)] underline-offset-2 hover:underline"
-            >
-              Open receipt in new tab
-            </a>
-          ) : null}
-        </div>
-
         <button
           type="button"
           onClick={() => void saveExpense()}
@@ -416,22 +360,9 @@ export function ExpenseTracker() {
             {saved.slice(0, 8).map((s) => (
               <li
                 key={s.id}
-                className="flex gap-3 rounded-xl border border-[var(--border)] bg-white p-3 text-sm dark:bg-neutral-950"
+                className="rounded-xl border border-[var(--border)] bg-white p-3 text-sm dark:bg-neutral-950"
               >
-                <a
-                  href={s.receipt_link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="h-14 w-12 shrink-0 overflow-hidden rounded-md border border-[var(--border)] bg-neutral-100 dark:bg-neutral-900"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={s.receipt_link}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                </a>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0">
                   <p className="font-medium">
                     {s.vendor || "Expense"} ·{" "}
                     <span className="tabular-nums">{s.amount}</span>
