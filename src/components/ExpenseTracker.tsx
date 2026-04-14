@@ -50,6 +50,7 @@ export function ExpenseTracker() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedExpense[]>([]);
 
@@ -120,7 +121,7 @@ export function ExpenseTracker() {
     }
   };
 
-  const saveExpense = () => {
+  const saveExpense = async () => {
     const amountNum = parseFloat(form.amount.replace(/,/g, ""));
     if (!form.receipt_link.trim()) {
       setStatus("Upload a receipt image before saving.");
@@ -130,22 +131,62 @@ export function ExpenseTracker() {
       setStatus("Enter a valid amount.");
       return;
     }
-    const record: SavedExpense = {
-      id: crypto.randomUUID(),
-      date: form.date.trim() || new Date().toISOString().slice(0, 10),
-      vendor: form.vendor.trim(),
-      category: form.category,
-      amount: amountNum,
-      description: form.description.trim(),
-      payment_method: form.payment_method.trim(),
-      receipt_link: form.receipt_link,
-      savedAt: new Date().toISOString(),
-    };
-    const next = [record, ...saved];
-    setSaved(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setStatus("Saved.");
-    resetUpload();
+
+    const dateStr = form.date.trim() || new Date().toISOString().slice(0, 10);
+
+    setSaving(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/save-expense", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: dateStr,
+          vendor: form.vendor.trim(),
+          category: form.category,
+          amount: amountNum,
+          description: form.description.trim(),
+          payment_method: form.payment_method.trim(),
+          receipt_link: form.receipt_link,
+        }),
+      });
+
+      let data: { success?: boolean; error?: string; details?: string } = {};
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        setStatus("Invalid response from server.");
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        const base = data.error ?? `Save failed (${res.status})`;
+        const msg = data.details ? `${base}: ${data.details}` : base;
+        setStatus(msg);
+        return;
+      }
+
+      const record: SavedExpense = {
+        id: crypto.randomUUID(),
+        date: dateStr,
+        vendor: form.vendor.trim(),
+        category: form.category,
+        amount: amountNum,
+        description: form.description.trim(),
+        payment_method: form.payment_method.trim(),
+        receipt_link: form.receipt_link,
+        savedAt: new Date().toISOString(),
+      };
+      const next = [record, ...saved];
+      setSaved(next);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      setStatus("Saved to Google Sheets");
+      resetUpload();
+    } catch {
+      setStatus("Network error. Could not reach the server.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   useEffect(() => () => revokePreview(), [revokePreview]);
@@ -358,10 +399,11 @@ export function ExpenseTracker() {
 
         <button
           type="button"
-          onClick={saveExpense}
-          className="mt-2 w-full rounded-lg bg-[var(--foreground)] py-2.5 text-sm font-medium text-[var(--background)] dark:bg-white dark:text-black"
+          onClick={() => void saveExpense()}
+          disabled={saving}
+          className="mt-2 w-full rounded-lg bg-[var(--foreground)] py-2.5 text-sm font-medium text-[var(--background)] disabled:opacity-50 dark:bg-white dark:text-black"
         >
-          Save expense
+          {saving ? "Saving…" : "Save expense"}
         </button>
       </section>
 
