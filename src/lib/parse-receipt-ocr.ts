@@ -396,7 +396,10 @@ function extractMoneySequenceFromLine(line: string): number[] {
   const plainInt = /\b(\d{3,})\b/g;
   let im: RegExpExecArray | null;
   while ((im = plainInt.exec(safeLine)) !== null) {
-    const n = parseInt(im[1], 10);
+    const raw = im[1];
+    // Singapore postal code pattern (6 digits) should never be treated as money.
+    if (/^\d{6}$/.test(raw)) continue;
+    const n = parseInt(raw, 10);
     if (n >= 100 && n < 1e9) push(n);
   }
 
@@ -443,6 +446,33 @@ function classifyAmountLine(line: string): LineKind {
   return "other";
 }
 
+function isAddressLikeLine(line: string): boolean {
+  const l = line.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!l) return false;
+  if (
+    /\b(road|rd|street|st|avenue|ave|drive|dr|lane|ln|boulevard|blvd|building|tower|unit|blk|block|level|#\d|singapore)\b/i.test(
+      l
+    )
+  ) {
+    return true;
+  }
+  if (/\b\d{6}\b/.test(l) && /\bsingapore\b/i.test(l)) return true;
+  if (/^\d{1,4}\s+[a-z]/i.test(l) && /\b(road|street|avenue|drive|lane)\b/i.test(l))
+    return true;
+  return false;
+}
+
+function hasPaymentContext(line: string): boolean {
+  const l = line.toLowerCase();
+  return /\b(total|amount|payable|to\s*pay|due|balance|paid|payment|net)\b/i.test(
+    l
+  );
+}
+
+function hasRealisticPriceSignal(line: string): boolean {
+  return /\d+\.\d{2}\b/.test(line) || /S\$|SGD|SG\$|[$₩£€]|USD|US\$|KRW|EUR|GBP/i.test(line);
+}
+
 function isReasonableFinalAmount(n: number): boolean {
   // Reject very tiny values (typical tax/service fragments).
   if (!Number.isFinite(n) || n < 0.5) return false;
@@ -465,6 +495,7 @@ function extractAmount(text: string): number | null {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (isAddressLikeLine(line)) continue;
     const values = extractMoneySequenceFromLine(line);
     if (!values.length) continue;
 
@@ -473,6 +504,7 @@ function extractAmount(text: string): number | null {
     const kind = classifyAmountLine(line);
     if (kind === "exclude") continue;
     if (!isReasonableFinalAmount(rightMost)) continue;
+    if (!hasPaymentContext(line) && !hasRealisticPriceSignal(line)) continue;
 
     candidates.push({
       value: rightMost,
