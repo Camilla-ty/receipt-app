@@ -154,7 +154,7 @@ const MONTH_MAP: Record<string, number> = {
 };
 
 function validYmd(y: number, m: number, d: number): string | null {
-  if (y < 1990 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
   const dt = new Date(Date.UTC(y, m - 1, d));
   if (
     dt.getUTCFullYear() !== y ||
@@ -166,18 +166,39 @@ function validYmd(y: number, m: number, d: number): string | null {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
-/** Prefer US (m,d) when a>12 or b>12; else try both and keep both candidates. */
-function interpretMdY(a: number, b: number, y: number): string[] {
-  const out: string[] = [];
-  const us = validYmd(y, a, b);
-  const eu = validYmd(y, b, a);
-  if (a > 12 && eu) out.push(eu);
-  else if (b > 12 && us) out.push(us);
-  else {
-    if (us) out.push(us);
-    if (eu && eu !== us) out.push(eu);
+const DEFAULT_RECEIPT_YEAR = 2026;
+
+function enforceReceiptYearPolicy(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return `${DEFAULT_RECEIPT_YEAR}-01-01`;
+  let y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+
+  if (y < DEFAULT_RECEIPT_YEAR) y = DEFAULT_RECEIPT_YEAR;
+
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(today.getDate()).padStart(2, "0")}`;
+  const candidate = validYmd(y, mo, d);
+  if (!candidate) return `${DEFAULT_RECEIPT_YEAR}-01-01`;
+
+  // If the parsed date is in the future, force the year to 2027.
+  if (candidate > todayIso) {
+    const future = validYmd(2027, mo, d);
+    if (future) return future;
+    return "2027-01-01";
   }
-  return out;
+
+  return candidate;
+}
+
+/** Singapore format: day first for numeric dates. */
+function interpretSingaporeDmy(day: number, month: number, year: number): string[] {
+  const iso = validYmd(year, month, day);
+  return iso ? [iso] : [];
 }
 
 type DateHit = { iso: string; score: number };
@@ -219,15 +240,24 @@ function extractDate(text: string): string {
       if (iso) addHits(hits, [iso], lineScore + 25);
     }
 
-    // DD/MM/YYYY or MM/DD/YYYY (2-digit year also)
+    // Numeric dates interpreted as Singapore format (DD/MM/YYYY or DD-MM-YY).
     const reDmy = /\b(\d{1,2})[\s./-](\d{1,2})[\s./-](\d{4}|\d{2})\b/g;
     while ((m = reDmy.exec(line)) !== null) {
       let y = parseInt(m[3], 10);
-      if (y < 100) y += y >= 70 ? 1900 : 2000;
-      const a = parseInt(m[1], 10);
-      const b = parseInt(m[2], 10);
-      const candidates = interpretMdY(a, b, y);
+      if (y < 100) y += 2000;
+      const day = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10);
+      const candidates = interpretSingaporeDmy(day, month, y);
       addHits(hits, candidates, lineScore + 20);
+    }
+
+    // Missing year (DD/MM or DD-MM): default to 2026.
+    const reDmyNoYear = /\b(\d{1,2})[\s./-](\d{1,2})\b/g;
+    while ((m = reDmyNoYear.exec(line)) !== null) {
+      const day = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10);
+      const candidates = interpretSingaporeDmy(day, month, DEFAULT_RECEIPT_YEAR);
+      addHits(hits, candidates, lineScore + 8);
     }
 
     // Korean: 2024년 3월 15일 / 24. 3. 15
@@ -290,7 +320,7 @@ function extractDate(text: string): string {
     if (iso) addHits(hits, [iso], 5);
   }
 
-  if (!hits.length) return "";
+  if (!hits.length) return `${DEFAULT_RECEIPT_YEAR}-01-01`;
 
   const bestByIso = new Map<string, number>();
   for (const h of hits) {
@@ -302,7 +332,7 @@ function extractDate(text: string): string {
     score,
   }));
   merged.sort((a, b) => b.score - a.score);
-  return merged[0].iso;
+  return enforceReceiptYearPolicy(merged[0].iso);
 }
 
 function extractPaymentMethod(text: string): string {
@@ -373,55 +403,42 @@ function extractMoneySequenceFromLine(line: string): number[] {
   return amounts;
 }
 
-type LineKind = "strong_total" | "weak_total" | "subtotal" | "tax_only" | "other";
+type LineKind =
+  | "total"
+  | "amount_paid"
+  | "subtotal"
+  | "tax_or_service"
+  | "other";
 
 function classifyAmountLine(line: string): LineKind {
   const l = line.toLowerCase().replace(/\s+/g, " ");
 
   if (
-    /\bgrand\s*total\b|\btotal\s*due\b|\bamount\s*due\b|\bbalance\s*due\b|\btotal\s*payable\b|\bfinal\s*total\b|\btotal\s*amount\b|\bpayment\s*total\b|\btotal\s*paid\b|\bpaid\s*total\b|\bnet\s*total\b|\bamount\s*payable\b|\bnett?\s*amount\b|\btotal\s*\(?\s*incl(?:uding|usive)?\.?\s*gst\b|\bgst\s*inclusive\s*total\b/i.test(
+    /\bsub\s*total\b|\bsubtotal\b|\bnet\s*subtotal\b|\bitem\s*total\b|\bitems\s*total\b|\b소계\b|\b중간\s*합계\b/i.test(
       line
     )
   ) {
-    return "strong_total";
-  }
-
-  if (
-    /합계|총\s*계|총금액|결제\s*금액|받을\s*금액|청구\s*금액|판매\s*합계|거래\s*금액/.test(
-      line
-    )
-  ) {
-    return "strong_total";
-  }
-
-  if (/\bsub\s*total\b|\bsubtotal\b|\bnet\s*subtotal\b|\bitem\s*total\b|\bitems\s*total\b|\b소계\b|\b중간\s*합계\b/i.test(line)) {
     return "subtotal";
   }
 
   if (
-    /^\s*(tax|vat|gst|hst|pst|부가세|세금)\b/i.test(l) &&
-    !/\btotal\b/i.test(l)
+    /\b(tax|vat|gst|hst|pst|service\s*charge|svc|부가세|세금)\b/i.test(l)
   ) {
-    return "tax_only";
+    return "tax_or_service";
   }
 
   if (
-    /\btip\b|\bgratuity\b|\bdiscount\b|\breward\b|\bchange\b|\bcash\s*back\b/i.test(
-      line
+    /\b(total|grand\s*total|total\s*due|final\s*total|net\s*total|amount\s*due|amount\s*payable)\b/i.test(
+      l
     ) &&
-    !/\btotal\b/i.test(l)
+    !/\bsub\s*total\b|\bsubtotal\b/i.test(l)
   ) {
-    return "tax_only";
+    return "total";
   }
 
-  if (
-    /\btotal\b/i.test(line) &&
-    !/\bsub\s*total\b|\bsubtotal\b/i.test(line)
-  ) {
-    return "weak_total";
+  if (/\b(amount\s*paid|amount)\b/i.test(l)) {
+    return "amount_paid";
   }
-
-  if (/^total\s*[:=]/i.test(line.trim())) return "weak_total";
 
   return "other";
 }
@@ -430,87 +447,38 @@ function extractAmount(text: string): number | null {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
 
-  const kinds = lines.map((line) => classifyAmountLine(line));
+  const totals: number[] = [];
+  const amounts: number[] = [];
+  const fallback: number[] = [];
 
-  type Scored = { value: number; score: number; lineIndex: number };
-  const scored: Scored[] = [];
+  for (const line of lines) {
+    const values = extractMoneySequenceFromLine(line);
+    if (!values.length) continue;
+    const largestOnLine = Math.max(...values);
+    const kind = classifyAmountLine(line);
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const amounts = extractMoneySequenceFromLine(line);
-    if (!amounts.length) continue;
-
-    const kind = kinds[i];
-    const posWeight = (i / Math.max(lines.length - 1, 1)) * 25;
-
-    let lineScore = posWeight;
-    let pick: number;
-
-    switch (kind) {
-      case "strong_total":
-        lineScore += 120;
-        pick = amounts[amounts.length - 1];
-        break;
-      case "weak_total":
-        lineScore += 75;
-        pick = amounts[amounts.length - 1];
-        break;
-      case "subtotal":
-        lineScore += 15;
-        pick = amounts[amounts.length - 1];
-        break;
-      case "tax_only":
-        lineScore -= 30;
-        pick = amounts[amounts.length - 1];
-        break;
-      default:
-        lineScore += 0;
-        pick = amounts[amounts.length - 1];
+    if (kind === "total") {
+      totals.push(largestOnLine);
+      continue;
     }
-
-    scored.push({ value: pick, score: lineScore, lineIndex: i });
-  }
-
-  const strong = scored.filter(
-    (s) =>
-      kinds[s.lineIndex] === "strong_total" ||
-      kinds[s.lineIndex] === "weak_total"
-  );
-
-  if (strong.length) {
-    strong.sort((a, b) => b.score - a.score || b.lineIndex - a.lineIndex);
-    const best = strong[0].value;
-    return Math.round(best * 100) / 100;
-  }
-
-  const nonSub = scored.filter((s) => {
-    const k = kinds[s.lineIndex];
-    return k !== "subtotal" && k !== "tax_only";
-  });
-
-  if (nonSub.length) {
-    nonSub.sort((a, b) => b.score - a.score || b.lineIndex - a.lineIndex);
-    const best = nonSub[0].value;
-    return Math.round(best * 100) / 100;
-  }
-
-  if (scored.length) {
-    const subOnly = scored.every((s) => kinds[s.lineIndex] === "subtotal");
-    if (subOnly) {
-      scored.sort((a, b) => b.lineIndex - a.lineIndex);
-      return Math.round(scored[0].value * 100) / 100;
+    if (kind === "amount_paid") {
+      amounts.push(largestOnLine);
+      continue;
     }
-    scored.sort((a, b) => b.lineIndex - a.lineIndex);
-    const tail = scored.slice(0, 5);
-    const maxTail = Math.max(...tail.map((t) => t.value));
-    return Math.round(maxTail * 100) / 100;
+    if (kind === "subtotal" || kind === "tax_or_service") {
+      continue;
+    }
+    fallback.push(largestOnLine);
   }
 
-  const allLines = lines.join("\n");
-  const all = extractMoneySequenceFromLine(allLines.replace(/\n/g, " "));
+  if (totals.length) return Math.round(Math.max(...totals) * 100) / 100;
+  if (amounts.length) return Math.round(Math.max(...amounts) * 100) / 100;
+  if (fallback.length) return Math.round(Math.max(...fallback) * 100) / 100;
+
+  // Last resort: include all lines (including subtotal/tax/service) if no better candidate exists.
+  const all = lines.flatMap((line) => extractMoneySequenceFromLine(line));
   if (!all.length) return null;
-  const max = Math.max(...all);
-  return Math.round(max * 100) / 100;
+  return Math.round(Math.max(...all) * 100) / 100;
 }
 
 function extractVendor(text: string): string {
@@ -529,14 +497,47 @@ function extractVendor(text: string): string {
   return "";
 }
 
-function extractDescription(text: string, vendor: string): string {
+function shortName(input: string): string {
+  const cleaned = input
+    .replace(/\b(pte|ltd|inc|llc|co|company|store|branch)\b/gi, "")
+    .replace(/[^\p{L}\p{N}\s&/-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned.slice(0, 36).trim();
+}
+
+function extractItemName(text: string, vendor: string): string {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && l !== vendor);
-  const mid = lines.slice(1, Math.min(6, lines.length)).join(" · ");
-  if (mid.length > 240) return `${mid.slice(0, 237)}…`;
-  return mid;
+    .filter(Boolean);
+  const skip =
+    /\b(total|subtotal|tax|gst|service|amount|paid|receipt|invoice|date|time|thank|change|cash|visa|master|payment)\b/i;
+  for (const line of lines.slice(1, 16)) {
+    if (line === vendor) continue;
+    if (line.length < 2 || line.length > 48) continue;
+    if (skip.test(line)) continue;
+    if (/\d{2,}/.test(line) && !/[a-z]/i.test(line)) continue;
+    const item = shortName(line);
+    if (item) return item;
+  }
+  return "";
+}
+
+function extractDescription(
+  text: string,
+  vendor: string,
+  category: ReceiptCategory
+): string {
+  const place = shortName(vendor) || "Receipt";
+  if (category === "Food") {
+    return `${place} Meeting`;
+  }
+
+  const item = extractItemName(text, vendor);
+  if (item) return `${item} for class`;
+  return `${place} for class`;
 }
 
 export function parseReceiptFromText(rawText: string): ParsedReceiptFields {
@@ -556,7 +557,7 @@ export function parseReceiptFromText(rawText: string): ParsedReceiptFields {
   const payment_method = extractPaymentMethod(text);
   const amount = extractAmount(text);
   const category = normalizeCategoryFromText(text);
-  const description = extractDescription(text, vendor);
+  const description = extractDescription(text, vendor, category);
   return {
     date,
     vendor,

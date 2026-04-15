@@ -23,9 +23,20 @@ type Body = Record<(typeof FIELDS)[number], unknown>;
 
 function normalizeAmount(amount: unknown): string {
   if (typeof amount === "number" && Number.isFinite(amount)) {
-    return String(amount);
+    return String(Math.round(amount * 100) / 100);
   }
-  return String(amount ?? "").trim();
+  const parsed = parseFloat(String(amount ?? "").replace(/,/g, "").trim());
+  if (Number.isFinite(parsed)) {
+    return String(Math.round(parsed * 100) / 100);
+  }
+  return "";
+}
+
+function cleanText(value: unknown, max = 120): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
 }
 
 const REFRESH_TOKEN_HELP =
@@ -51,10 +62,10 @@ export async function POST(request: NextRequest) {
   }
 
   const date = String(b.date ?? "").trim();
-  const vendor = String(b.vendor ?? "");
-  const category = String(b.category ?? "");
-  const description = String(b.description ?? "");
-  const payment_method = String(b.payment_method ?? "");
+  const vendor = cleanText(b.vendor, 80);
+  const category = cleanText(b.category, 40);
+  const description = cleanText(b.description, 80);
+  const payment_method = cleanText(b.payment_method, 40);
 
   const year = extractYearFromDate(date);
   if (!year) {

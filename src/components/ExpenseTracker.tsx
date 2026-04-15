@@ -33,6 +33,7 @@ function applyExtracted(
 
 export function ExpenseTracker() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [form, setForm] = useState(defaultForm);
@@ -60,6 +61,7 @@ export function ExpenseTracker() {
     setPreviewUrl(null);
     setForm(defaultForm());
     if (inputRef.current) inputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
   }, [revokePreview]);
 
   const onPickFile = async (f: File | null) => {
@@ -185,18 +187,35 @@ export function ExpenseTracker() {
           className="hidden"
           onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
         />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+        />
 
         {!file ? (
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--border)] py-12 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--foreground)]"
-          >
-            <span className="font-medium text-[var(--foreground)]">
-              Upload receipt
-            </span>
-            <span className="mt-1">PNG, JPG, or WebP · one image at a time</span>
-          </button>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--border)] py-8 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--foreground)]"
+            >
+              <span className="font-medium text-[var(--foreground)]">
+                Upload receipt
+              </span>
+              <span className="mt-1">PNG, JPG, or WebP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm font-medium"
+            >
+              Take photo with camera
+            </button>
+          </div>
         ) : (
           <div className="space-y-4">
             <div className="flex gap-4">
@@ -227,6 +246,13 @@ export function ExpenseTracker() {
                     className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
                   >
                     Replace image
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+                  >
+                    Retake with camera
                   </button>
                   <button
                     type="button"
