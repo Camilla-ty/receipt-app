@@ -39,6 +39,7 @@ export function ExpenseTracker() {
   const [form, setForm] = useState(defaultForm);
   const [extracting, setExtracting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedExpense[]>([]);
 
@@ -59,6 +60,7 @@ export function ExpenseTracker() {
     revokePreview();
     setFile(null);
     setPreviewUrl(null);
+    setIsLightboxOpen(false);
     setForm(defaultForm());
     if (inputRef.current) inputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -166,6 +168,14 @@ export function ExpenseTracker() {
   };
 
   useEffect(() => () => revokePreview(), [revokePreview]);
+  useEffect(() => {
+    if (!isLightboxOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsLightboxOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isLightboxOpen]);
 
   const fieldClass =
     "w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] dark:bg-neutral-950";
@@ -221,12 +231,19 @@ export function ExpenseTracker() {
             <div className="flex gap-4">
               <div className="relative h-28 w-24 shrink-0 overflow-hidden rounded-lg border border-[var(--border)] bg-neutral-100 dark:bg-neutral-900">
                 {previewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={previewUrl}
-                    alt="Receipt preview"
-                    className="h-full w-full object-cover"
-                  />
+                  <button
+                    type="button"
+                    className="h-full w-full cursor-zoom-in"
+                    onClick={() => setIsLightboxOpen(true)}
+                    aria-label="Open receipt preview"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewUrl}
+                      alt="Receipt preview"
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
                 ) : null}
               </div>
               <div className="flex flex-1 flex-col justify-center gap-2">
@@ -402,6 +419,36 @@ export function ExpenseTracker() {
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {isLightboxOpen && previewUrl ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
+          onClick={() => setIsLightboxOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="relative max-h-full w-full max-w-3xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Receipt image preview"
+          >
+            <button
+              type="button"
+              className="absolute right-2 top-2 z-10 rounded-full bg-black/65 px-3 py-1 text-sm text-white"
+              onClick={() => setIsLightboxOpen(false)}
+            >
+              Close
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt="Receipt full preview"
+              className="max-h-[85vh] w-full rounded-xl bg-white object-contain"
+            />
+          </div>
+        </div>
       ) : null}
     </div>
   );
