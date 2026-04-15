@@ -5,6 +5,7 @@ import type { ExtractedExpense, SavedExpense } from "@/lib/types";
 import { CATEGORIES } from "@/lib/types";
 
 const STORAGE_KEY = "expense-tracker-saved";
+const PAYMENT_METHOD_OPTIONS = ["Card", "Cash", "PayNow", "Others"] as const;
 function defaultForm(): Record<keyof ExtractedExpense, string> {
   return {
     date: "",
@@ -179,6 +180,12 @@ export function ExpenseTracker() {
 
   const fieldClass =
     "w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] dark:bg-neutral-950";
+  const normalizedPaymentMethod = form.payment_method.trim();
+  const hasCustomPaymentMethod =
+    normalizedPaymentMethod.length > 0 &&
+    !PAYMENT_METHOD_OPTIONS.includes(
+      normalizedPaymentMethod as (typeof PAYMENT_METHOD_OPTIONS)[number]
+    );
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
@@ -373,15 +380,25 @@ export function ExpenseTracker() {
           <span className="mb-1 block text-xs text-[var(--muted)]">
             Payment method
           </span>
-          <input
-            type="text"
+          <select
             className={fieldClass}
-            placeholder="Card, cash, mobile pay…"
             value={form.payment_method}
             onChange={(e) =>
               setForm((f) => ({ ...f, payment_method: e.target.value }))
             }
-          />
+          >
+            <option value="">Select payment method</option>
+            {PAYMENT_METHOD_OPTIONS.map((method) => (
+              <option key={method} value={method}>
+                {method}
+              </option>
+            ))}
+            {hasCustomPaymentMethod ? (
+              <option value={normalizedPaymentMethod}>
+                {normalizedPaymentMethod}
+              </option>
+            ) : null}
+          </select>
         </label>
 
         <button
