@@ -404,79 +404,131 @@ function extractMoneySequenceFromLine(line: string): number[] {
 }
 
 type LineKind =
-  | "total"
-  | "amount_paid"
-  | "subtotal"
-  | "tax_or_service"
+  | "strong_total"
+  | "medium_total"
+  | "weak_amount"
+  | "exclude"
   | "other";
 
 function classifyAmountLine(line: string): LineKind {
   const l = line.toLowerCase().replace(/\s+/g, " ");
 
+  // 1) Hard excludes: unwanted / intermediate values.
   if (
-    /\bsub\s*total\b|\bsubtotal\b|\bnet\s*subtotal\b|\bitem\s*total\b|\bitems\s*total\b|\b소계\b|\b중간\s*합계\b/i.test(
-      line
+    /\bsub\s*total\b|\bsubtotal\b|\bnet\s*subtotal\b|\bitem\s*total\b|\bitems\s*total\b|\b소계\b|\b중간\s*합계\b|\bdiscount\b|\bpromo\b|\bvoucher\b|\bcoupon\b|\boff\b|\brounding\b|\bround\s*off\b|\btip\b|\bgratuity\b|\bchange\b|\bcash\s*back\b|\bdeposit\b|\bpre[\s-]*auth\b|\bauth(orization)?\b|\bapproval\b|\bpoints?\b|\breward\b/i.test(
+      l
     )
   ) {
-    return "subtotal";
+    return "exclude";
   }
 
-  if (
-    /\b(tax|vat|gst|hst|pst|service\s*charge|svc|부가세|세금)\b/i.test(l)
-  ) {
-    return "tax_or_service";
-  }
+  if (/\b(tax|vat|gst|hst|pst|service\s*charge|svc|부가세|세금)\b/i.test(l))
+    return "exclude";
 
+  // 2) Strong keywords (highest confidence).
   if (
-    /\b(total|grand\s*total|total\s*due|final\s*total|net\s*total|amount\s*due|amount\s*payable)\b/i.test(
+    /\b(total|grand\s*total|total\s*due|amount\s*due|balance\s*due|amount\s*payable|net\s*amount|final\s*total|total\s*payable|total\s*to\s*pay)\b/i.test(
       l
-    ) &&
-    !/\bsub\s*total\b|\bsubtotal\b/i.test(l)
+    )
   ) {
-    return "total";
+    return "strong_total";
   }
 
-  if (/\b(amount\s*paid|amount)\b/i.test(l)) {
-    return "amount_paid";
-  }
+  // 3) Medium keywords.
+  if (/\b(total\s*amount|to\s*pay|payable)\b/i.test(l)) return "medium_total";
+
+  // 4) Weak candidates.
+  if (/\b(amount|amount\s*paid)\b/i.test(l)) return "weak_amount";
 
   return "other";
+}
+
+function isReasonableFinalAmount(n: number): boolean {
+  // Reject very tiny values (typical tax/service fragments).
+  if (!Number.isFinite(n) || n < 0.5) return false;
+  // Reject unrealistically large OCR noise.
+  if (n > 1_000_000) return false;
+  return true;
 }
 
 function extractAmount(text: string): number | null {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
 
-  const totals: number[] = [];
-  const amounts: number[] = [];
-  const fallback: number[] = [];
+  type Candidate = {
+    value: number;
+    kind: LineKind;
+    index: number;
+    line: string;
+  };
+  const candidates: Candidate[] = [];
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const values = extractMoneySequenceFromLine(line);
     if (!values.length) continue;
-    const largestOnLine = Math.max(...values);
-    const kind = classifyAmountLine(line);
 
-    if (kind === "total") {
-      totals.push(largestOnLine);
-      continue;
-    }
-    if (kind === "amount_paid") {
-      amounts.push(largestOnLine);
-      continue;
-    }
-    if (kind === "subtotal" || kind === "tax_or_service") {
-      continue;
-    }
-    fallback.push(largestOnLine);
+    // Prefer the right-most amount on the line (usually the payable figure).
+    const rightMost = values[values.length - 1];
+    const kind = classifyAmountLine(line);
+    if (kind === "exclude") continue;
+    if (!isReasonableFinalAmount(rightMost)) continue;
+
+    candidates.push({
+      value: rightMost,
+      kind,
+      index: i,
+      line,
+    });
   }
 
-  if (totals.length) return Math.round(Math.max(...totals) * 100) / 100;
-  if (amounts.length) return Math.round(Math.max(...amounts) * 100) / 100;
-  if (fallback.length) return Math.round(Math.max(...fallback) * 100) / 100;
+  const lineCount = lines.length;
+  const bottomWeight = (index: number) =>
+    (index / Math.max(lineCount - 1, 1)) * 30;
+  const byBottomThenLast = (a: Candidate, b: Candidate) =>
+    bottomWeight(b.index) - bottomWeight(a.index) || b.index - a.index;
 
-  // Last resort: include all lines (including subtotal/tax/service) if no better candidate exists.
-  const all = lines.flatMap((line) => extractMoneySequenceFromLine(line));
+  // 7.a) Strong keyword match (TOTAL-related).
+  const strong = candidates
+    .filter((c) => c.kind === "strong_total")
+    .sort(byBottomThenLast);
+  if (strong.length) {
+    // 5) If multiple TOTAL entries exist, choose the last occurrence near bottom.
+    return Math.round(strong[0].value * 100) / 100;
+  }
+
+  // 7.b) Last occurrence of TOTAL in document (label-safe fallback).
+  const totalish = candidates
+    .filter((c) => /\btotal\b/i.test(c.line))
+    .sort((a, b) => b.index - a.index);
+  if (totalish.length) {
+    return Math.round(totalish[0].value * 100) / 100;
+  }
+
+  // Medium then weak, with bottom preference.
+  const medium = candidates
+    .filter((c) => c.kind === "medium_total")
+    .sort(byBottomThenLast);
+  if (medium.length) return Math.round(medium[0].value * 100) / 100;
+
+  const weak = candidates
+    .filter((c) => c.kind === "weak_amount")
+    .sort(byBottomThenLast);
+  if (weak.length) return Math.round(weak[0].value * 100) / 100;
+
+  // 7.c) Largest reasonable numeric value.
+  const reasonable = candidates
+    .filter((c) => c.kind === "other")
+    .map((c) => c.value)
+    .filter(isReasonableFinalAmount);
+  if (reasonable.length) {
+    return Math.round(Math.max(...reasonable) * 100) / 100;
+  }
+
+  // 7.d) OCR fallback if nothing matches.
+  const all = lines
+    .flatMap((line) => extractMoneySequenceFromLine(line))
+    .filter(isReasonableFinalAmount);
   if (!all.length) return null;
   return Math.round(Math.max(...all) * 100) / 100;
 }
