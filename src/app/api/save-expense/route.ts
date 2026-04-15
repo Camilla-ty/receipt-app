@@ -39,6 +39,26 @@ function cleanText(value: unknown, max = 120): string {
     .slice(0, max);
 }
 
+function normalizePaymentMethod(value: unknown): "Card" | "Cash" | "PayNow" | "Others" {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (
+    v === "card" ||
+    v === "credit" ||
+    v === "credit card" ||
+    v === "debit" ||
+    v === "debit card" ||
+    v === "visa" ||
+    v === "mastercard" ||
+    v === "master card" ||
+    v === "amex"
+  ) {
+    return "Card";
+  }
+  if (v === "cash") return "Cash";
+  if (v === "paynow") return "PayNow";
+  return "Others";
+}
+
 const REFRESH_TOKEN_HELP =
   "Create OAuth 2.0 credentials (Web application) in Google Cloud Console, set the redirect URI to match GOOGLE_REDIRECT_URI, then open the OAuth Playground (https://developers.google.com/oauthplayground), use your own OAuth credentials (gear icon), select scope https://www.googleapis.com/auth/spreadsheets, authorize, and exchange the authorization code for tokens. Copy the refresh_token into GOOGLE_REFRESH_TOKEN in .env.local.";
 
@@ -65,7 +85,7 @@ export async function POST(request: NextRequest) {
   const vendor = cleanText(b.vendor, 80);
   const category = cleanText(b.category, 40);
   const description = cleanText(b.description, 80);
-  const payment_method = cleanText(b.payment_method, 40);
+  const payment_method = normalizePaymentMethod(b.payment_method);
 
   const year = extractYearFromDate(date);
   if (!year) {

@@ -6,6 +6,28 @@ import { CATEGORIES } from "@/lib/types";
 
 const STORAGE_KEY = "expense-tracker-saved";
 const PAYMENT_METHOD_OPTIONS = ["Card", "Cash", "PayNow", "Others"] as const;
+
+function normalizePaymentMethod(value: string | null | undefined): string {
+  const v = (value ?? "").trim().toLowerCase();
+  if (
+    v === "card" ||
+    v === "credit" ||
+    v === "credit card" ||
+    v === "debit" ||
+    v === "debit card" ||
+    v === "visa" ||
+    v === "mastercard" ||
+    v === "master card" ||
+    v === "amex"
+  ) {
+    return "Card";
+  }
+  if (v === "cash") return "Cash";
+  if (v === "paynow") return "PayNow";
+  if (v === "others" || v === "other") return "Others";
+  return "Others";
+}
+
 function defaultForm(): Record<keyof ExtractedExpense, string> {
   return {
     date: "",
@@ -13,7 +35,7 @@ function defaultForm(): Record<keyof ExtractedExpense, string> {
     category: "Other",
     amount: "",
     description: "",
-    payment_method: "",
+    payment_method: "Others",
   };
 }
 
@@ -28,7 +50,7 @@ function applyExtracted(
     category: e.category ?? "Other",
     amount: e.amount != null ? String(e.amount) : "",
     description: e.description ?? "",
-    payment_method: e.payment_method ?? "",
+    payment_method: normalizePaymentMethod(e.payment_method),
   };
 }
 
@@ -180,12 +202,6 @@ export function ExpenseTracker() {
 
   const fieldClass =
     "w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-sm outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] dark:bg-neutral-950";
-  const normalizedPaymentMethod = form.payment_method.trim();
-  const hasCustomPaymentMethod =
-    normalizedPaymentMethod.length > 0 &&
-    !PAYMENT_METHOD_OPTIONS.includes(
-      normalizedPaymentMethod as (typeof PAYMENT_METHOD_OPTIONS)[number]
-    );
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
@@ -387,17 +403,11 @@ export function ExpenseTracker() {
               setForm((f) => ({ ...f, payment_method: e.target.value }))
             }
           >
-            <option value="">Select payment method</option>
             {PAYMENT_METHOD_OPTIONS.map((method) => (
               <option key={method} value={method}>
                 {method}
               </option>
             ))}
-            {hasCustomPaymentMethod ? (
-              <option value={normalizedPaymentMethod}>
-                {normalizedPaymentMethod}
-              </option>
-            ) : null}
           </select>
         </label>
 
